@@ -3,7 +3,7 @@ terraform {
   backend "s3" {
     bucket  = "tfstate.katsuya-place.com"
     region  = "ap-northeast-1"
-    key     = "web01/rds/dev.tfstate"
+    key     = "aws-aurora-postgresql/rds/dev.tfstate"
     encrypt = true
   }
 }
@@ -13,7 +13,7 @@ data "terraform_remote_state" "network" {
   config = {
     bucket = "tfstate.katsuya-place.com"
     region = "ap-northeast-1"
-    key    = "web01/network/dev.tfstate"
+    key     = "aws-aurora-postgresql/network/dev.tfstate"
   }
 }
 
