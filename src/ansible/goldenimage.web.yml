@@ -1,0 +1,176 @@
+- name: "GoldenImage Web"
+  hosts: all
+  become: true
+  tasks:
+    #######################################################
+    # Package install
+    #######################################################
+    - name: install mysql repository
+      yum:
+        name: https://dev.mysql.com/get/mysql80-community-release-el7-3.noarch.rpm
+
+    - name: install packages
+      yum: 
+        name:
+          - git
+          - gcc
+          - openssl-devel
+          - readline-devel
+          - zlib-devel
+          - mysql-community-client
+          - mysql-community-devel
+          - jq
+
+    - name: download nodejs setup tool
+      shell: curl https://rpm.nodesource.com/setup_13.x | bash -
+    
+    - name: install nodejs
+      yum:
+        name: nodejs
+
+    #######################################################
+    # Create OS user
+    #######################################################
+    - name: add app user
+      user:
+        name: app-user
+
+    #######################################################
+    # Setup ruby
+    #######################################################
+    - name: install rbenv
+      become_user: app-user
+      git:
+        repo: https://github.com/rbenv/rbenv.git
+        dest: /home/app-user/.rbenv
+    
+    - name: add various variables to .bash_profile of app-user
+      become_user: app-user
+      blockinfile:
+          dest: /home/app-user/.bash_profile
+          content: |
+            export PATH="$HOME/.rbenv/bin:$PATH"
+            eval "$(rbenv init -)"
+            export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}}
+            export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}}
+            export AWS_DEFAULT_REGION=ap-northeast-1
+            export RAILS_ENV=production
+
+    - name: create rbenv plugins dir
+      become_user: app-user
+      file:
+        path: /home/app-user/.rbenv/plugins
+        state: directory
+        owner: app-user
+        group: app-user
+        mode: 0775
+
+    - name: git clone ruby-build plugin
+      become_user: app-user
+      git:
+        repo: https://github.com/rbenv/ruby-build.git
+        dest: /home/app-user/.rbenv/plugins/ruby-build
+
+    - name: check if ruby is installed
+      become_user: app-user
+      shell: . ~/.bash_profile && ruby -v
+      register: check_ruby_version
+      ignore_errors: True
+      args:
+        chdir: /home/app-user
+
+    - name: install ruby-build
+      shell: .rbenv/plugins/ruby-build/install.sh
+      args:
+        chdir: /home/app-user
+      when: check_ruby_version.rc != 0
+
+    - name: activate ruby
+      become_user: app-user
+      shell: . ~/.bash_profile && rbenv install 2.6.3 && rbenv local 2.6.3
+      args:
+        chdir: /home/app-user
+      when: check_ruby_version.rc != 0
+
+    - name: install bundler
+      become_user: app-user
+      shell: . ~/.bash_profile && gem install bundler
+      args:
+        chdir: /home/app-user
+      when: check_ruby_version.rc != 0
+
+    #######################################################
+    # Setup SSH (github)
+    #######################################################
+    - name: create ssh directory
+      become_user: app-user
+      file:
+        path: /home/app-user/.ssh
+        state: directory
+        owner: app-user
+        group: app-user
+        mode: 0700
+
+    - name: check ssh secretkey
+      shell: ls -l /home/app-user/.ssh/id_rsa
+      register: check_ssh_secretkey
+      ignore_errors: True
+
+    - name: create ssh secretkey
+      become_user: app-user
+      shell: . ~/.bash_profile && aws secretsmanager get-secret-value --secret-id ssh_secret_key_github --query 'SecretBinary' --output 'text' | base64 -d > /home/app-user/.ssh/id_rsa
+      when: check_ssh_secretkey.rc != 0
+
+    - name: chown && chmod ssh secretkey
+      file:
+        dest: /home/app-user/.ssh/id_rsa
+        owner: app-user
+        group: app-user
+        mode: 0600
+
+    #######################################################
+    # Setup App
+    #######################################################
+    - name: check DATABASE_URL in .bash_profile of app-user
+      become_user: app-user
+      shell: |
+        . ~/.bash_profile
+        test $DATABASE_URL
+      register: check_database_url
+      ignore_errors: True
+
+    - name: add DATABASE_URL to .bash_profile of app-user
+      become_user: app-user
+      shell: |
+        . ~/.bash_profile
+        SECRET_STRING=`aws secretsmanager get-secret-value --secret-id rds_login_user --query 'SecretString' | jq fromjson`
+        DB_USER=`echo $SECRET_STRING | jq .username`
+        DB_PASS=`echo $SECRET_STRING | jq .password`
+        DB_HOST=`echo $SECRET_STRING | jq .host`
+        echo "export DATABASE_URL=mysql2://${DB_USER}:${DB_PASS}@${DB_HOST}/sample_app" >> ~/.bash_profile
+      when: check_database_url.rc != 0
+
+    - name: git clone app
+      become_user: app-user
+      git:
+        repo: git@github.com:katsuya-yamaguchi/rails_sample_apps.git
+        dest: /home/app-user/www/app
+        version: HEAD
+        key_file: /home/app-user/.ssh/id_rsa
+        accept_hostkey: yes
+        force: yes
+
+    - name: bundle install
+      become_user: app-user
+      shell: source ~/.bash_profile && bundle install --without=development test
+      args:
+        chdir: /home/app-user/www/app
+      ignore_errors: True
+
+    # to start puma as root
+    - name: add app variables to .bash_profile of root
+      blockinfile:
+        dest: /root/.bash_profile
+        content: |
+          export RAILS_ENV=production
+          export SECRET_KEY_BASE={{SECRET_KEY_BASE}}
