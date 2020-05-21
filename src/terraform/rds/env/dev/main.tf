@@ -13,7 +13,7 @@ data "terraform_remote_state" "network" {
   config = {
     bucket = "tfstate.katsuya-place.com"
     region = "ap-northeast-1"
-    key     = "aws-aurora-postgresql/network/dev.tfstate"
+    key    = "aws-aurora-postgresql/network/dev.tfstate"
   }
 }
 

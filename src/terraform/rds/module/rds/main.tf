@@ -78,7 +78,7 @@ resource "aws_rds_cluster" "postgresql" {
 
   db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.sample.name
   kms_key_id                      = aws_kms_key.rds_storage.arn
-  storage_encrypted = true
+  storage_encrypted               = true
   iam_roles                       = []
   #iam_database_authentication_enabled = ""
   engine         = "aurora-postgresql"
@@ -98,17 +98,17 @@ resource "aws_rds_cluster" "postgresql" {
 }
 
 resource "aws_rds_cluster_instance" "cluster_instance" {
-  count                        = 2
-  identifier                   = "sample-instance-${count.index}"
-  cluster_identifier           = aws_rds_cluster.postgresql.cluster_identifier
-  engine                       = "aurora-postgresql"
-  engine_version               = "11.6"
-  instance_class               = "db.t3.medium"
-  publicly_accessible          = false
-  db_subnet_group_name         = aws_db_subnet_group.db.name
-  apply_immediately            = false
-  monitoring_role_arn          = aws_iam_role.default.arn
-  monitoring_interval          = "1"
+  count                = 2
+  identifier           = "sample-instance-${count.index}"
+  cluster_identifier   = aws_rds_cluster.postgresql.cluster_identifier
+  engine               = "aurora-postgresql"
+  engine_version       = "11.6"
+  instance_class       = "db.t3.medium"
+  publicly_accessible  = false
+  db_subnet_group_name = aws_db_subnet_group.db.name
+  apply_immediately    = false
+  monitoring_role_arn  = aws_iam_role.default.arn
+  monitoring_interval  = "60"
 
   # プライマリインスタンスで障害が発生した際に、レプリカをマスターに昇格させる際の優先度を指定する。
   # どのレプリカも同じ状態になるはずなので、未指定。
@@ -116,7 +116,7 @@ resource "aws_rds_cluster_instance" "cluster_instance" {
   # availability_zone            = var.az_a
   # preferred_backup_window      = "18:00-19:00"
   # preferred_maintenance_window = "sat:15:00-sat:16:00"
-  auto_minor_version_upgrade   = true
+  auto_minor_version_upgrade = true
 
   # t3.medium >= であれば使用できる。
   performance_insights_enabled    = true
