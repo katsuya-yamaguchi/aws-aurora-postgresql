@@ -205,4 +205,10 @@ resource "aws_kms_key" "rds_performance_insight" {
 resource "aws_rds_cluster_parameter_group" "sample" {
   name   = "sample"
   family = "aurora-postgresql11"
+
+  parameter {
+    name         = "shared_preload_libraries"
+    value        = "pg_hint_plan"
+    apply_method = "pending-reboot"
+  }
 }
