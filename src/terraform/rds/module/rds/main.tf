@@ -3,6 +3,10 @@ variable "az_a" {}
 variable "subnet_id_private_db_a" {}
 variable "subnet_id_private_db_c" {}
 variable "security_group_db" {}
+variable "db_identifier" {
+  type    = string
+  default = "sample"
+}
 
 
 ##################################################
@@ -44,19 +48,29 @@ resource "aws_db_subnet_group" "db" {
 }
 
 resource "aws_rds_cluster" "postgresql" {
-  cluster_identifier    = "sample"
+  cluster_identifier    = var.db_identifier
   copy_tags_to_snapshot = true
   database_name         = "sample_app"
   deletion_protection   = false
   master_password       = "1qaz2wSx"
   master_username       = "postgres"
+
   # クラスタが削除される際にスナップショットを取得する場合の識別子。指定されない場合、スナップショットは作成されない。
   # final_snapshot_identifier = ""
+
   skip_final_snapshot = true
+
   # 自動的に3つのAZでクラスタボリュームは構成される。何も指定しない場合、MultiAZで作成される。
   # availability_zones = []
-  backtrack_window             = "0"
-  backup_retention_period      = "1"
+
+  # MySQLの場合しか使用できない。
+  backtrack_window = "0"
+
+  # 保管期間として1~35日が指定できる。
+  backup_retention_period = "1"
+
+  # 自動バックアップとは別。インスタンスのスナップショットを取得するためのウィンドウ。
+  # aws_rds_cluster_instanceでも設定できるため、どちらかで設定する。
   preferred_backup_window      = "16:00-17:00"
   preferred_maintenance_window = "sun:15:00-sun:16:00"
   port                         = "5432"
@@ -69,6 +83,7 @@ resource "aws_rds_cluster" "postgresql" {
   # global_cluster_identifier = ""
 
   # リードレプリカを作成する場合にソースとなるDBクラスタ or DBインスタンスを指定する。
+  # レプリカは、aws_rds_cluster_instanceのcountで作成する。そのため、この設定をいつ使用するのか不明。
   # replication_source_identifier = ""
 
   apply_immediately = false
@@ -92,14 +107,16 @@ resource "aws_rds_cluster" "postgresql" {
   # serverlessモードでのみ有効。
   # scaling_configuration {}
   # enable_http_endpoint = "" 
+
   lifecycle {
-    ignore_changes = [availability_zones]
+    ignore_changes = [availability_zones, master_password]
   }
 }
 
 resource "aws_rds_cluster_instance" "cluster_instance" {
-  count                = 2
-  identifier           = "sample-instance-${count.index}"
+  # count                = 2
+  count                = 1
+  identifier           = "${var.db_identifier}-instance-${count.index}"
   cluster_identifier   = aws_rds_cluster.postgresql.cluster_identifier
   engine               = "aurora-postgresql"
   engine_version       = "11.6"
@@ -113,73 +130,47 @@ resource "aws_rds_cluster_instance" "cluster_instance" {
   # プライマリインスタンスで障害が発生した際に、レプリカをマスターに昇格させる際の優先度を指定する。
   # どのレプリカも同じ状態になるはずなので、未指定。
   # promotion_tier               = ""
+
+  # MultiAZのため未指定。
   # availability_zone            = var.az_a
+
   # preferred_backup_window      = "18:00-19:00"
   # preferred_maintenance_window = "sat:15:00-sat:16:00"
+
   auto_minor_version_upgrade = true
 
   # t3.medium >= であれば使用できる。
   performance_insights_enabled    = true
   performance_insights_kms_key_id = aws_kms_key.rds_performance_insight.arn
-  copy_tags_to_snapshot           = true
-  #ca_cert_identifier = ""
+
+  copy_tags_to_snapshot = true
+  # ca_cert_identifier    = "rds-ca-2019"
 }
 
+resource "aws_rds_cluster_parameter_group" "sample" {
+  name   = var.db_identifier
+  family = "aurora-postgresql11"
 
-# resource "aws_db_instance" "db" {
-#   allocated_storage           = 20
-#   allow_major_version_upgrade = false
-#   apply_immediately           = false
-#   auto_minor_version_upgrade  = false
-#   # availability_zone           = var.az_a
-#   backup_retention_period = 0
-#   backup_window           = "16:00-16:30"
-#   # ca_cert_identifier                    = ""
-#   copy_tags_to_snapshot    = true
-#   db_subnet_group_name     = aws_db_subnet_group.db.name
-#   delete_automated_backups = true
-#   deletion_protection      = false
-#   # enabled_cloudwatch_logs_exports       = []
-#   engine              = "MySQL"
-#   engine_version      = "5.7.28"
-#   skip_final_snapshot = true
-#   # final_snapshot_identifier             = ""
-#   iam_database_authentication_enabled = true
-#   identifier                          = "main"
-#   instance_class                      = "db.t2.micro"
-#   # iops                                = "gp2"
-#   maintenance_window    = "Sun:02:00-Sun:02:30"
-#   max_allocated_storage = 0
-#   monitoring_interval   = 1
-#   monitoring_role_arn   = aws_iam_role.default.arn
-#   #multi_az              = true
-#   multi_az = false
-#   name     = "sample_app"
-#   # option_group_name    = "sample_app"
-#   parameter_group_name = aws_db_parameter_group.db_pg.name
-#   password             = "sample_app"
-#   port                 = 3306
-#   publicly_accessible  = false
-#   # replicate_source_db  = aws_db_instance.db.identifier
-#   # storage_encrypted    = false
-#   # kms_key_id            = aws_kms_key.rds_storage.arn
-#   username = "admin"
-#   vpc_security_group_ids = [
-#     var.security_group_db
-#   ]
-#   # performance_insights_enabled = true
-#   # performance_insights_kms_key_id       = aws_kms_key.rds_performance_insight.id
-#   # performance_insights_retention_period = 7 
+  parameter {
+    name         = "shared_preload_libraries"
+    value        = "pg_stat_statements, pg_hint_plan"
+    apply_method = "pending-reboot"
+  }
 
-#   lifecycle {
-#     ignore_changes = [password]
-#   }
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "5"
+  }
 
-#   tags = {
-#     Env = var.env
-#   }
-# }
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"
+  }
+}
 
+##################################################
+# kms
+##################################################
 resource "aws_kms_key" "rds_storage" {
   description             = "key to encrypt rds storage."
   key_usage               = "ENCRYPT_DECRYPT"
@@ -202,13 +193,31 @@ resource "aws_kms_key" "rds_performance_insight" {
   }
 }
 
-resource "aws_rds_cluster_parameter_group" "sample" {
-  name   = "sample"
-  family = "aurora-postgresql11"
+##################################################
+# auto scaling
+##################################################
+resource "aws_appautoscaling_target" "replica" {
+  service_namespace  = "rds"
+  scalable_dimension = "rds:cluster:ReadReplicaCount"
+  resource_id        = "cluster:${aws_rds_cluster.postgresql.id}"
+  min_capacity       = 1
+  max_capacity       = 1
+}
 
-  parameter {
-    name         = "shared_preload_libraries"
-    value        = "pg_hint_plan"
-    apply_method = "pending-reboot"
+resource "aws_appautoscaling_policy" "replica" {
+  name               = "cpu-auto-scaling"
+  service_namespace  = aws_appautoscaling_target.replica.service_namespace
+  scalable_dimension = aws_appautoscaling_target.replica.scalable_dimension
+  resource_id        = aws_appautoscaling_target.replica.resource_id
+  policy_type        = "TargetTrackingScaling"
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "RDSReaderAverageCPUUtilization"
+    }
+
+    target_value       = 80
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 300
   }
 }
