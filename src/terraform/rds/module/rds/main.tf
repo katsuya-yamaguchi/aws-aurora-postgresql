@@ -193,13 +193,31 @@ resource "aws_kms_key" "rds_performance_insight" {
   }
 }
 
-resource "aws_rds_cluster_parameter_group" "sample" {
-  name   = "sample"
-  family = "aurora-postgresql11"
+##################################################
+# auto scaling
+##################################################
+resource "aws_appautoscaling_target" "replica" {
+  service_namespace  = "rds"
+  scalable_dimension = "rds:cluster:ReadReplicaCount"
+  resource_id        = "cluster:${aws_rds_cluster.postgresql.id}"
+  min_capacity       = 1
+  max_capacity       = 1
+}
 
-  parameter {
-    name         = "shared_preload_libraries"
-    value        = "pg_hint_plan"
-    apply_method = "pending-reboot"
+resource "aws_appautoscaling_policy" "replica" {
+  name               = "cpu-auto-scaling"
+  service_namespace  = aws_appautoscaling_target.replica.service_namespace
+  scalable_dimension = aws_appautoscaling_target.replica.scalable_dimension
+  resource_id        = aws_appautoscaling_target.replica.resource_id
+  policy_type        = "TargetTrackingScaling"
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "RDSReaderAverageCPUUtilization"
+    }
+
+    target_value       = 80
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 300
   }
 }
